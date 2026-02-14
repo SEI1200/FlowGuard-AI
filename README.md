@@ -35,11 +35,7 @@ backend/    Python 3.11+ / FastAPI + Vertex AI (Gemini 3 Pro: 解析, Gemini 2.5
 
 ## セットアップ
 
-### 注意: 秘匿情報について
-
-**API キーや Firebase の設定は `.env` で管理し、Git にコミットしないでください。**  
-リポジトリには `.env.example` のみ含まれています。各 `.env.example` を `.env` にコピーし、ご自身のキーを設定してください。  
-（過去に `.env` をコミットしている場合は、`git rm --cached backend/.env frontend/.env` で追跡解除し、必要に応じて履歴から削除してください。）
+環境変数は、各ディレクトリの `.env.example` を `.env` にコピーして設定します。
 
 ### バックエンド
 
@@ -121,7 +117,3 @@ npm run dev
 - [docs/OVERVIEW.md](docs/OVERVIEW.md) - プロジェクト概要・対象ユーザー・解決する課題
 - [docs/FEATURES.md](docs/FEATURES.md) - 機能一覧と利用手順
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - アーキテクチャ・API・データモデル・ディレクトリ構成
-
-## ライセンス
-
-本リポジトリの利用条件はプロジェクトのライセンスに従います。
