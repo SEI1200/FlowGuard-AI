@@ -94,6 +94,12 @@ export default function App() {
 
   const { result, loading, error, simulate, reset: resetSimulation } = useRiskSimulation();
 
+  // プロジェクト（参加コード）が変わったら What-if はそのプロジェクト専用にするためクリア
+  useEffect(() => {
+    setWhatIfCases([]);
+    setAdoptedWhatIfResult(null);
+  }, [joinCode]);
+
   // 参加時にプロジェクトの状態を復元
   useEffect(() => {
     if (!showMainFlow || !projectData || restoredRef.current) return;
