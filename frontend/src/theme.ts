@@ -1,4 +1,4 @@
-import { createTheme } from "@mui/material/styles";
+import { createTheme, type Shadows } from "@mui/material/styles";
 
 /** iOS風カラー */
 const IOS_BLUE = "#007AFF";
@@ -78,8 +78,7 @@ const theme = createTheme({
     "0 80px 168px rgba(0,0,0,0.08)",
     "0 84px 176px rgba(0,0,0,0.08)",
     "0 88px 184px rgba(0,0,0,0.08)",
-    "0 92px 192px rgba(0,0,0,0.08)",
-  ] as const,
+  ] as Shadows,
   components: {
     MuiCssBaseline: {
       styleOverrides: {

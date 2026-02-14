@@ -2,6 +2,9 @@
 
 イベントのリスクを AI でシミュレーションし、関係者で共有・対策まで一気通貫で扱う Web アプリケーションです。
 
+- ローカル開発と Google Cloud Run でのデプロイに対応しています。
+- API キー・環境変数は `.env` で管理し、リポジトリにはコミットしません（`.env.example` をコピーして設定してください）。
+
 ## 概要
 
 FlowGuard AI は、地図（Google Maps / Cesium）とバックエンドの AI 分析（FastAPI + Vertex AI Gemini）、リアルタイム共有（Firebase Firestore）を組み合わせ、主催者・警備・自治体・会場管理者が、イベント前からリスクを予測・分析・軽減策の検討を行えるようにします。
@@ -111,6 +114,10 @@ npm run dev
 | アシスト AI | Gemini 2.5 Flash（アプリの使い方ガイド） |
 | 地図 | Google Maps JavaScript API（2D）、Cesium（3D） |
 | 共有 | Firebase Firestore、Firebase Auth（匿名） |
+
+## デプロイ（Cloud Run）
+
+バックエンド・フロントエンドそれぞれに `Dockerfile` と（フロントは `cloudbuild.yaml`）を用意しています。Google Cloud プロジェクトで Cloud Run API・Cloud Build API を有効にしたうえで、`backend/` と `frontend/` をそれぞれソースからデプロイできます。環境変数は Cloud Run の「変数とシークレット」またはビルド時の `--substitutions`（フロントの `VITE_*`）で設定してください。
 
 ## ドキュメント
 

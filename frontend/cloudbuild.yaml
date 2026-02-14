@@ -1,0 +1,75 @@
+# フロントをビルド時環境変数（VITE_*）付きでビルドし、Cloud Run にデプロイする。
+# 共有機能（Firebase）を使う場合は _VITE_FIREBASE_* を --substitutions で渡す。
+#
+# 例（PowerShell）:
+#   cd frontend
+#   gcloud builds submit . --config=cloudbuild.yaml ^
+#     --substitutions="_VITE_API_BASE_URL=https://flowguard-api-xxx.run.app,_VITE_FIREBASE_API_KEY=xxx,_VITE_FIREBASE_AUTH_DOMAIN=xxx,_VITE_FIREBASE_PROJECT_ID=xxx,_VITE_FIREBASE_STORAGE_BUCKET=xxx,_VITE_FIREBASE_MESSAGING_SENDER_ID=xxx,_VITE_FIREBASE_APP_ID=xxx"
+#
+substitutions:
+  _VITE_API_BASE_URL: ""
+  _VITE_GOOGLE_MAPS_API_KEY: ""
+  _VITE_FIREBASE_API_KEY: ""
+  _VITE_FIREBASE_AUTH_DOMAIN: ""
+  _VITE_FIREBASE_PROJECT_ID: ""
+  _VITE_FIREBASE_STORAGE_BUCKET: ""
+  _VITE_FIREBASE_MESSAGING_SENDER_ID: ""
+  _VITE_FIREBASE_APP_ID: ""
+  _VITE_GOOGLE_MAP_ID: ""
+  _REGION: "asia-northeast1"
+  _SERVICE_NAME: "flowguard-web"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build"
+    args:
+      - "build"
+      - "--no-cache"
+      - "--build-arg"
+      - "VITE_API_BASE_URL=${_VITE_API_BASE_URL}"
+      - "--build-arg"
+      - "VITE_GOOGLE_MAPS_API_KEY=${_VITE_GOOGLE_MAPS_API_KEY}"
+      - "--build-arg"
+      - "VITE_FIREBASE_API_KEY=${_VITE_FIREBASE_API_KEY}"
+      - "--build-arg"
+      - "VITE_FIREBASE_AUTH_DOMAIN=${_VITE_FIREBASE_AUTH_DOMAIN}"
+      - "--build-arg"
+      - "VITE_FIREBASE_PROJECT_ID=${_VITE_FIREBASE_PROJECT_ID}"
+      - "--build-arg"
+      - "VITE_FIREBASE_STORAGE_BUCKET=${_VITE_FIREBASE_STORAGE_BUCKET}"
+      - "--build-arg"
+      - "VITE_FIREBASE_MESSAGING_SENDER_ID=${_VITE_FIREBASE_MESSAGING_SENDER_ID}"
+      - "--build-arg"
+      - "VITE_FIREBASE_APP_ID=${_VITE_FIREBASE_APP_ID}"
+      - "--build-arg"
+      - "VITE_GOOGLE_MAP_ID=${_VITE_GOOGLE_MAP_ID}"
+      - "-t"
+      - "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/${_SERVICE_NAME}:${BUILD_ID}"
+      - "."
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push"
+    args:
+      - "push"
+      - "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/${_SERVICE_NAME}:${BUILD_ID}"
+    waitFor: ["build"]
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "deploy"
+    entrypoint: "gcloud"
+    args:
+      - "run"
+      - "deploy"
+      - "${_SERVICE_NAME}"
+      - "--image"
+      - "asia-northeast1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/${_SERVICE_NAME}:${BUILD_ID}"
+      - "--region"
+      - "${_REGION}"
+      - "--platform"
+      - "managed"
+      - "--allow-unauthenticated"
+      - "--quiet"
+    waitFor: ["push"]

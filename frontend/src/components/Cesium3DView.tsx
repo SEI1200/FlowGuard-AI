@@ -138,12 +138,13 @@ export default function Cesium3DView({
       }
 
       // カメラを会場＋500m 内に制限
-      const sceneWithCam = scene as {
+      const sceneWithCam = scene as unknown as {
         camera: { position: unknown; setView: (opts: { destination: unknown }) => void };
         postRender: { addEventListener: (cb: () => void) => () => void };
       };
       const clampCamera = () => {
-        const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(sceneWithCam.camera.position as { x: number; y: number; z: number });
+        const pos = sceneWithCam.camera.position as { x: number; y: number; z: number };
+        const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(Cesium.Cartesian3.fromElements(pos.x, pos.y, pos.z));
         let lon = carto.longitude;
         let lat = carto.latitude;
         let height = carto.height;

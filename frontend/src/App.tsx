@@ -449,7 +449,7 @@ export default function App() {
           </Fade>
         )}
 
-        {activeStep === 2 && effectiveResult && !completionPhase && !loading && (
+        {activeStep === 2 && effectiveResult && displayResult && !completionPhase && !loading && (
           <Fade in>
             <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
               <RiskDashboard

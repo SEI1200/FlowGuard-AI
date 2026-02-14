@@ -1,9 +1,13 @@
 import io
+import logging
 import os
 import re
+import subprocess
 from datetime import datetime
 
 from reportlab.lib import colors
+
+logger = logging.getLogger(__name__)
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
@@ -166,11 +170,36 @@ def _get_pdf_font() -> tuple[str, bool]:
     if _JAPANESE_FONT_REGISTERED is not None:
         return _PDF_FONT_NAME, _JAPANESE_FONT_REGISTERED
     candidates = [
-        "C:/Windows/Fonts/meiryo.ttf",
-        "C:/Windows/Fonts/msgothic.ttc",
+        "/app/fonts/NotoSansCJK.ttc",
+        "/app/fonts/ipaex.ttf",
+        "/usr/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/ipaexfont/ipaexg.ttf",
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+        "C:/Windows/Fonts/meiryo.ttf",
+        "C:/Windows/Fonts/msgothic.ttc",
     ]
+    try:
+        out = subprocess.run(
+            ["fc-list", "--format=%{file}\\n", ":lang=ja"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode == 0 and out.stdout:
+            for line in out.stdout.strip().split("\n"):
+                path = line.strip().split(":")[0].strip()
+                if not path or not os.path.isfile(path):
+                    continue
+                if path.lower().endswith((".ttf", ".ttc")):
+                    low = path.lower()
+                    if "noto" in low or "cjk" in low or "japanese" in low or "jp" in low or "ipa" in low:
+                        candidates.insert(0, path)
+                        break
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
     for path in candidates:
         if not os.path.isfile(path):
             continue
@@ -181,9 +210,12 @@ def _get_pdf_font() -> tuple[str, bool]:
                 pdfmetrics.registerFont(TTFont("PdfJapanese", path))
             _PDF_FONT_NAME = "PdfJapanese"
             _JAPANESE_FONT_REGISTERED = True
+            logger.info("PDF Japanese font registered: %s", path)
             return _PDF_FONT_NAME, True
-        except Exception:
+        except Exception as e:
+            logger.warning("PDF font registration failed for %s: %s", path, e)
             continue
+    logger.warning("No Japanese font available; PDF will show '?' for non-ASCII. Tried: %s", [p for p in candidates if os.path.isfile(p)] or "none found")
     _JAPANESE_FONT_REGISTERED = False
     return _PDF_FONT_NAME, False
 

@@ -124,6 +124,12 @@ frontend/
       nextActionProposals.ts # 提案型、computeNextActionProposals
 ```
 
+## デプロイ
+
+- **バックエンド**: `backend/Dockerfile` で Python 3.11 + uvicorn。日本語 PDF 用にコンテナ内で Noto CJK または IPAex フォントを利用。
+- **フロントエンド**: `frontend/Dockerfile`（Node ビルド → nginx 配信）と `frontend/cloudbuild.yaml`（ビルド時 `VITE_*` を渡して Cloud Run にデプロイ）。`VITE_API_BASE_URL` と必要に応じて `VITE_FIREBASE_*`・`VITE_GOOGLE_MAPS_API_KEY` をビルド時に指定する。
+- 秘匿情報（API キー・環境変数）はリポジトリに含めず、`.env` および Cloud Run の「変数とシークレット」またはビルド substitution で設定する。
+
 ## バックエンドのディレクトリ構成（概要）
 
 ```

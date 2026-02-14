@@ -49,3 +49,6 @@ Thumbs.db
 # ログ・一時ファイル
 *.log
 .cache/
+
+# 大きなフォント（PDF 用は Docker ビルド時に取得。同梱 OTF はコミットしない）
+backend/fonts/*.otf

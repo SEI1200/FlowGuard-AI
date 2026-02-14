@@ -816,7 +816,7 @@ export default function RiskDashboard({
                 onRunAndAddCase={onRunAndAddCase}
                 onAdoptCase={onAdoptCase}
                 loading={whatIfLoading}
-                currentConfig={missionConfig}
+                currentConfig={missionConfig ?? null}
                 locale={locale}
               />
             )}
