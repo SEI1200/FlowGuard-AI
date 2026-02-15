@@ -121,8 +121,6 @@ npm run dev
 
 バックエンド・フロントエンドそれぞれに `Dockerfile` と（フロントは `cloudbuild.yaml`）を用意しています。Google Cloud プロジェクトで Cloud Run API・Cloud Build API を有効にしたうえで、`backend/` と `frontend/` をそれぞれソースからデプロイできます。環境変数は Cloud Run の「変数とシークレット」またはビルド時の `--substitutions`（フロントの `VITE_*`）で設定してください。
 
-**解析のデプロイ**: 変更があるのはバックエンドのみです。フロントエンドと API の入出力は変わらないため、**バックエンドを再デプロイ**すれば反映されます。自律型マルチエージェントで解析する場合は、Cloud Run の「変数とシークレット」で `USE_MULTI_AGENT=1`（または `true` / `yes`）を設定してください。フロントエンドの再デプロイは不要です。
-
 ## ドキュメント
 
 - [docs/OVERVIEW.md](docs/OVERVIEW.md) - プロジェクト概要・対象ユーザー・解決する課題
