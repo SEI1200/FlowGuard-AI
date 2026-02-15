@@ -941,3 +941,171 @@ def build_pdf(
         )
 
     return buffer.getvalue()
+
+
+def _strip_html(s: str) -> str:
+    if not s:
+        return ""
+    s = re.sub(r"<[^>]+>", "", s)
+    s = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    return s.strip()
+
+
+def get_report_text(
+    response: SimulationResponse,
+    delta_summary: dict | None = None,
+    site_check_memos: list | None = None,
+    todo_checks: dict | None = None,
+    adopted_todos: list | None = None,
+    pins: list | None = None,
+) -> str:
+    """PDFフル版と同じ構成のレポートをプレーンテキストで返す。アシストの回答用。"""
+    is_ja = getattr(response, "locale", "ja") == "ja"
+    labels = LABELS_JA if is_ja else LABELS_EN
+    category_headings = RISK_CATEGORY_HEADINGS_JA if is_ja else RISK_CATEGORY_HEADINGS_EN
+
+    def p(t: str) -> str:
+        return _safe_text((t or "").strip(), True)
+
+    lines: list[str] = []
+    lines.append(f"{labels['title']} — {labels['subtitle']}")
+    lines.append("")
+    lines.append(f"{labels['event']}: {p(response.event_name)}")
+    lines.append(f"{labels['location']}: {p(response.event_location or '—')}")
+    lines.append(f"{labels['date_time']}: {p(response.date_time or '—')}")
+    lines.append(f"{labels['report_id']}: {response.simulation_id or '—'}")
+    lines.append("")
+
+    lines.append(labels["executive_summary"])
+    lines.append(p(response.summary))
+    lines.append("")
+
+    lines.append(f"{labels['overall_risk_score']}: {response.overall_risk_score:.1f} / 10")
+    lines.append("")
+
+    if delta_summary and isinstance(delta_summary, dict):
+        sb = delta_summary.get("riskScoreBefore")
+        sa = delta_summary.get("riskScoreAfter")
+        if sb is not None and sa is not None:
+            lines.append("対策効果（対策前 → 対策後）")
+            lines.append(f"  総合リスクスコア: {float(sb):.1f} → {float(sa):.1f}")
+            db = delta_summary.get("dangerCountBefore")
+            da = delta_summary.get("dangerCountAfter")
+            if db is not None and da is not None:
+                lines.append(f"  危険ポイント数: {int(db)}件 → {int(da)}件")
+            lines.append("")
+
+    tasks = getattr(response, "mitigation_tasks", None) or []
+    if tasks:
+        lines.append(labels["todo_list"])
+        checked_set = set()
+        if isinstance(todo_checks, dict):
+            for tid, v in todo_checks.items():
+                if v:
+                    checked_set.add(str(tid))
+        for t in tasks:
+            tid = getattr(t, "id", "") or ""
+            status = labels["done"] if tid in checked_set else labels["pending"]
+            who = p((getattr(t, "who", "") or "")[:20])
+            action = p((getattr(t, "action", "") or "")[:200])
+            due = (getattr(t, "due_by", "") or "—")[:10]
+            lines.append(f"  [{status}] {who} — {action} （期限: {due}）")
+        lines.append("")
+
+    if adopted_todos and isinstance(adopted_todos, list):
+        lines.append(labels["adopted_todos"])
+        for i, item in enumerate(adopted_todos, 1):
+            if not isinstance(item, dict):
+                continue
+            action = item.get("action") or item.get("title") or "—"
+            who = (item.get("who") or "").strip() or "—"
+            lines.append(f"  {i}. [{p(who)}] {p(str(action)[:80])}")
+        lines.append("")
+
+    lines.append(labels["risk_overview"])
+    for cat, count in response.risk_count_by_category.items():
+        try:
+            label = category_headings.get(RiskCategory(cat), cat)
+        except ValueError:
+            label = cat
+        lines.append(f"  {p(str(label))}: {count}件")
+    lines.append("")
+
+    if getattr(response, "risk_time_series", None) and response.risk_time_series:
+        lines.append(labels["time_series"])
+        for s in response.risk_time_series:
+            label = getattr(s, "label", None) or (getattr(s, "start_time", "")[:16] if getattr(s, "start_time", None) else "—")
+            score = getattr(s, "risk_score", 0)
+            lines.append(f"  {p(str(label)[:30])}: {float(score):.1f}")
+        lines.append("")
+
+    routes = getattr(response, "map_routes", None) or []
+    bottlenecks = getattr(response, "bottlenecks", None) or []
+    if routes or bottlenecks:
+        lines.append(labels["recommended_routes"])
+        rec_routes = [r for r in routes if getattr(r, "type", "") == "recommended"]
+        if rec_routes:
+            lines.append(f"  {labels['recommended_routes']}: {len(rec_routes)}本")
+        if bottlenecks:
+            lines.append(labels["staff_placement"])
+            for b in bottlenecks[:15]:
+                loc = p((getattr(b, "location_description", "") or "")[:50])
+                reason = p((getattr(b, "reason", "") or "")[:40])
+                lines.append(f"    ・ {loc} — {labels['bottleneck_reason']}: {reason}")
+        lines.append("")
+
+    if site_check_memos and isinstance(site_check_memos, list):
+        lines.append("現場確認メモ")
+        for item in site_check_memos:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("label") or item.get("id") or "—"
+            memo = (item.get("memo") or "").strip()
+            lines.append(f"  {p(str(label))}: {p(memo)[:150]}")
+        lines.append("")
+
+    if pins and isinstance(pins, list):
+        lines.append(labels["map_pins"])
+        for pin in pins:
+            if not isinstance(pin, dict):
+                continue
+            name = p((pin.get("name") or pin.get("id") or "—")[:30])
+            typ = p((pin.get("type") or "other")[:12])
+            memo = p((pin.get("memo") or "—")[:50])
+            lines.append(f"  {name} [{typ}]: {memo}")
+        lines.append("")
+
+    lines.append(labels["detailed_risks"])
+    for cat in RiskCategory:
+        risks_in_cat = [r for r in response.risks if r.category == cat]
+        if not risks_in_cat:
+            continue
+        cat_label = category_headings.get(cat, getattr(cat, "value", str(cat)))
+        lines.append(f"【{p(str(cat_label))}】")
+        for r in risks_in_cat:
+            imp = getattr(r, "importance", None)
+            urg = getattr(r, "urgency", None)
+            extra = []
+            if imp is not None:
+                extra.append(f"{labels['importance']}: {float(imp):.1f}")
+            if urg is not None:
+                extra.append(f"{labels['urgency']}: {float(urg):.1f}")
+            line = f" ・ {p(r.title)} — {labels['severity']}: {r.severity:.1f}  {labels['probability']}: {r.probability * 100:.0f}%"
+            if extra:
+                line += "  " + "  ".join(extra)
+            lines.append(line)
+            if getattr(r, "location_description", None):
+                lines.append(f"    {labels['place']}: {p(r.location_description)[:80]}")
+            lines.append(f"    {p(r.description)[:300]}")
+            if r.mitigation_actions:
+                lines.append(f"    {labels['mitigation']}: {p('; '.join(r.mitigation_actions))[:200]}")
+            lines.append("")
+        lines.append("")
+
+    lines.append(labels["recommendations"])
+    for i, rec in enumerate(response.recommendations, 1):
+        lines.append(f"  {i}. {p(rec)[:250]}")
+    lines.append("")
+    lines.append(_strip_html(labels["footer"]))
+
+    return "\n".join(lines)

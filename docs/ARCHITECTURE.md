@@ -6,7 +6,7 @@
   シングルページの React アプリ（Vite）。ランディング、3 ステップ（イベント設定 → エリア指定 → リスク分析ダッシュボード）を描画し、参加中プロジェクトでは Firestore のリアルタイムリスナーを 1 本だけ購読する。シミュレーション・テンプレート・バリデーション・翻訳・PDF はバックエンドに HTTP で依頼する。
 
 - **バックエンド**  
-  FastAPI サーバー。Vertex AI（Gemini）によるリスクシミュレーション、テンプレート・バリデーションの提供、シミュレーション結果の日→英翻訳、PDF レポート生成、アプリガイド用の AI アシスト（/api/assist）を提供。オプションでエリアの道路スナップ（/api/area/snap-to-roads、外部 OSM 等）に対応（フロントエンド UI からは未呼び出し）。
+  FastAPI サーバー。Vertex AI（Gemini）によるリスクシミュレーション、テンプレート・バリデーションの提供、シミュレーション結果の日→英翻訳、PDF レポート生成、レポート本文のテキスト取得（/api/report/text）、アプリガイド用の AI アシスト（/api/assist）を提供。アシストにはオプションで現在の画面状態（分析結果・リスク数・ToDo 進捗・ピン数・レポート本文など）を渡すと、次のアクション提案や具体的な質問への簡潔な回答を行う。オプションでエリアの道路スナップ（/api/area/snap-to-roads、外部 OSM 等）に対応（フロントエンド UI からは未呼び出し）。
 
 - **Firebase**  
   オプション。プロジェクト共有用に Firestore を 1 コレクション（`projects`）、1 プロジェクト = 1 ドキュメント（ドキュメント ID = 参加コード）。匿名認証で書き込み。参加コードを持つ間だけリスナーを購読し、離脱・アンマウント時に解除する。
@@ -37,12 +37,32 @@
 | POST | `/api/area/snap-to-roads` | ポリゴン頂点を地図境界にスナップ。Body: `{ path: LatLng[] }`。`{ path: LatLng[] }`。 |
 | POST | `/api/simulate` | リスクシミュレーション実行。Body: `SimulationRequest`。Response: `SimulationResponse`。 |
 | POST | `/api/translate-simulation` | シミュレーション結果を日本語→英語に翻訳。Body: 全文 `SimulationResponse`。翻訳後の `SimulationResponse`。チャンク並列で高速化。 |
-| POST | `/api/assist` | アプリガイド AI。Body: `{ question: string }`。`{ answer: string }`。アプリの使い方・画面・アラート閾値などをガイドに基づき回答。 |
+| POST | `/api/assist` | アプリガイド AI。Body: `{ question: string, context?: AssistContext }`。context の定義は「アシストが参照する情報」を参照。回答は簡潔（2〜5 文程度）。`{ answer: string }`。 |
+| POST | `/api/report/text` | PDF フル版と同じ構成のレポートをプレーンテキストで取得。Body: シミュレーション + 任意で `delta_summary`, `site_check_memos`, `todo_checks`, `adopted_todos`, `pins`。アシストの `report_text` 用。`{ text: string }`。 |
 | POST | `/api/report/pdf` | PDF レポート生成。Query: `variant`（省略可、`one_page` で 1 枚要約）。Body: シミュレーション + 任意で `delta_summary`, `site_check_memos`, `todo_checks`, `adopted_todos`, `pins`。PDF バイナリ。 |
+
+### アシストが参照する情報（AssistContext）
+
+アシストは `/api/assist` の `body.context` として渡された「現在のアプリ状態」に基づき、具体的な回答・提案を行う。フロントは `displayResult`（分析結果。プロジェクト参加時は Firestore の `simulationResult` と同期）・`todoChecks`・`proposalDecisionLog`・`pins`・`mapTodos` 等から組み立てて送信する。
+
+| フィールド | 型 | 説明 |
+|------------|-----|------|
+| step | number | 現在ステップ（0: イベント設定, 1: エリア指定, 2: 分析ダッシュボード）。 |
+| event_name | string | イベント名。 |
+| risk_count, overall_risk_score, summary | number / string | 分析結果のサマリー。 |
+| recommendations | string[] | 分析結果の推奨（最大 15 件）。 |
+| risks | AssistContextRisk[] | リスク一覧。深刻度降順で最大 20 件。各要素は title, severity, importance, urgency, execution_difficulty, description, mitigation_actions。 |
+| todos | AssistContextTodo[] | 対策 ToDo 一覧（action, who, checked）。 |
+| next_action_proposals | AssistContextNextAction[] | **次にやるべき確認・対策**。未完了重要 ToDo・期限超過・高リスク時間帯からフロントで算出（分析タブの「次にやるべき確認・対策」と同内容）。各要素は title, reason, source（unfinished_todo / overdue / high_risk_slot）。 |
+| report_text | string | PDF フル版と同じ構成のレポート本文（/api/report/text で取得）。渡すと「最大の問題」「何をすべきか」等の具体的な質問にこの内容を基に簡潔に回答する。 |
+| todo_checked_count, todo_total_count | number | ToDo 進捗。 |
+| pins_count, map_todos_count | number | 地図上のピン数・地図 ToDo 数。 |
+
+「なにから対策したら良いでしょうか」「今もっとも早急にするべき対応は」等の質問には、`report_text` があればそれを第一に、なければ `next_action_proposals` と risks / recommendations を参照して、具体的な提案を 2〜5 文程度で返す。
 
 ### フロントエンドでの利用
 
-- **api.ts**: `runSimulation`, `buildSimulationRequest`, `fetchConfig`, `fetchTemplates`, `validateInput`, `translateSimulationResponse`, `askAssist`, `downloadReportPdf`, `healthCheck`。（道路スナップはバックエンド `/api/area/snap-to-roads` で提供。フロントエンドからは未呼び出し。）
+- **api.ts**: `runSimulation`, `buildSimulationRequest`, `fetchConfig`, `fetchTemplates`, `validateInput`, `translateSimulationResponse`, `askAssist(question, context?)`, `getReportText`, `downloadReportPdf`, `healthCheck`。アシスト呼び出し時にオプションで `AssistContext`（上記の定義）を渡し、`report_text` を含めると PDF フル版と同じレポート内容を基に具体的な質問に簡潔に回答する。（道路スナップはバックエンド `/api/area/snap-to-roads` で提供。フロントエンドからは未呼び出し。）
 - **firebase.ts**: REST は使わず Firestore SDK（`getDoc`, `setDoc`, `updateDoc`, `onSnapshot`）と Auth（`signInAnonymously`）。プロジェクト作成・参加・ピン・地図 ToDo 追加/削除・ToDo チェック・提案ログ・採用提案の読み書きを提供。
 
 ## Firestore データモデル
@@ -100,7 +120,7 @@ frontend/
       SiteCheckMemo.tsx      # 現場確認メモ（PDF 用）
       Cesium3DView.tsx       # 3D 地球（Cesium）
       MapView3D.tsx          # 3D ラッパー・フォールバック
-      AssistFab.tsx          # AI アシスト（フロートボタン、チャット UI、/api/assist）
+      AssistFab.tsx          # AI アシスト（フロートボタン、ドラッグ移動・右下リサイズ、チャット UI、/api/assist）
       SettingsDialog.tsx    # 設定モーダル
       SystemInfoDialog.tsx   # システム情報モーダル（アーキテクチャ・費用対効果・運用設計）
     context/
@@ -134,13 +154,13 @@ frontend/
 
 ```
 backend/
-  main.py              # FastAPI アプリ、CORS、ルート: health, config, templates, validate, snap-to-roads, simulate, assist, translate-simulation, report/pdf
+  main.py              # FastAPI アプリ、CORS、ルート: health, config, templates, validate, snap-to-roads, simulate, assist, translate-simulation, report/text, report/pdf
   models.py            # Pydantic: SimulationRequest, SimulationResponse, LatLng 等
   services/
     risk_engine.py     # RiskEngine: run_simulation, translate_simulation_to_english
     gemini_service.py  # Gemini 呼び出し、分析プロンプト、翻訳（チャンク並列）
-    assist_engine.py   # AssistEngine: アプリガイド（APP_GUIDE）とシステムプロンプトで /api/assist に回答
-    pdf_report.py      # build_pdf
+    assist_engine.py   # AssistEngine: アプリガイド（APP_GUIDE）とシステムプロンプトで /api/assist に回答。context.report_text があればレポート本文を基に具体的に簡潔回答。オプションの context で現在状態を前提に次のアクションを提案
+    pdf_report.py      # build_pdf, get_report_text（PDF フル版と同じ構成のテキスト）
     roads_service.py   # snap_path_to_map_boundaries
     weather_service.py # 天候取得
 ```

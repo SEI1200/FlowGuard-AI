@@ -11,7 +11,7 @@ from pydantic import ValidationError as PydanticValidationError
 from models import SimulationRequest, SimulationResponse, LatLng
 from services.risk_engine import RiskEngine
 from services.assist_engine import AssistEngine
-from services.pdf_report import build_pdf
+from services.pdf_report import build_pdf, get_report_text
 from services.roads_service import snap_path_to_map_boundaries
 from pydantic import BaseModel, Field
 from typing import Any
@@ -186,6 +186,7 @@ async def validate_input(body: ValidateInputBody):
 
 class AssistRequestBody(BaseModel):
     question: str = Field("", max_length=2000)
+    context: dict | None = Field(None, description="Optional app state for context-aware answers (step, event_name, risk_count, overall_risk_score, summary, todo_checked_count, todo_total_count, pins_count, map_todos_count)")
 
 
 @app.post("/api/assist")
@@ -193,7 +194,7 @@ async def assist(body: AssistRequestBody):
     if assist_engine is None:
         raise HTTPException(status_code=503, detail="Service not ready.")
     try:
-        answer = await assist_engine.answer(body.question)
+        answer = await assist_engine.answer(body.question, context=body.context)
         return {"answer": answer}
     except Exception as exc:
         logger.exception("Assist failed: %s", exc)
@@ -213,6 +214,38 @@ async def translate_simulation(body: dict):
             status_code=500,
             detail="Translation failed. Please try again.",
         )
+
+
+@app.post("/api/report/text")
+async def export_report_text(body: dict[str, Any]):
+    """PDFフル版と同じ構成のレポートをプレーンテキストで返す。アシストのコンテキスト用。"""
+    try:
+        delta_summary = body.get("delta_summary") if isinstance(body, dict) else None
+        site_check_memos = body.get("site_check_memos") if isinstance(body, dict) else None
+        todo_checks = body.get("todo_checks") if isinstance(body, dict) else None
+        adopted_todos = body.get("adopted_todos") if isinstance(body, dict) else None
+        pins = body.get("pins") if isinstance(body, dict) else None
+        payload_dict = {
+            k: v
+            for k, v in (body or {}).items()
+            if k not in ("delta_summary", "site_check_memos", "todo_checks", "adopted_todos", "pins")
+        }
+        payload = SimulationResponse.model_validate(payload_dict)
+        text = get_report_text(
+            payload,
+            delta_summary=delta_summary,
+            site_check_memos=site_check_memos,
+            todo_checks=todo_checks,
+            adopted_todos=adopted_todos,
+            pins=pins,
+        )
+        return {"text": text}
+    except PydanticValidationError as exc:
+        logger.warning("Report text payload validation error: %s", exc)
+        raise HTTPException(status_code=400, detail=exc.errors()[0].get("msg", str(exc)) if exc.errors() else str(exc))
+    except Exception as exc:
+        logger.exception("Report text generation failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Report text generation failed.")
 
 
 @app.post("/api/report/pdf")

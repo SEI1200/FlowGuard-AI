@@ -28,7 +28,15 @@ import type { WhatIfCase } from "./types/whatIf";
 import type { SiteCheckItem } from "./types/siteCheck";
 import { getDefaultSiteCheckItems } from "./types/siteCheck";
 import { useRiskSimulation } from "./hooks/useRiskSimulation";
-import { buildSimulationRequest, runSimulation, translateSimulationResponse } from "./services/api";
+import {
+  buildSimulationRequest,
+  runSimulation,
+  translateSimulationResponse,
+  getReportText,
+  type AssistContext,
+} from "./services/api";
+import { computeNextActionProposals } from "./utils/nextActionProposals";
+import { computeDeltaSummary } from "./utils/mitigationDelta";
 import { useLanguage } from "./i18n/LanguageContext";
 import { useProject } from "./context/ProjectContext";
 import type { Locale } from "./i18n/translations";
@@ -91,6 +99,7 @@ export default function App() {
   const [translatedResult, setTranslatedResult] = useState<SimulationResponse | null>(null);
   const [translatedForId, setTranslatedForId] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
+  const [reportText, setReportText] = useState<string | null>(null);
 
   const { result, loading, error, simulate, reset: resetSimulation } = useRiskSimulation();
 
@@ -137,6 +146,113 @@ export default function App() {
     locale === "en" && translatedResult && effectiveResult && translatedForId === effectiveResult.simulation_id
       ? translatedResult
       : effectiveResult;
+
+  const eventDateIso = missionConfig?.event_date ? `${missionConfig.event_date}T00:00:00` : undefined;
+  const nextActionProposals = useMemo(
+    () =>
+      displayResult && todoChecks
+        ? computeNextActionProposals(
+            displayResult,
+            todoChecks,
+            eventDateIso ?? null,
+            proposalDecisionLog ?? [],
+            t?.proposals,
+          )
+        : [],
+    [displayResult, todoChecks, eventDateIso, proposalDecisionLog, t?.proposals],
+  );
+
+  useEffect(() => {
+    if (activeStep !== 2 || !displayResult?.simulation_id) {
+      setReportText(null);
+      return;
+    }
+    const adoptedTasks = (adoptedProposals ?? []).map((p) => ({
+      id: p.taskId ?? p.key,
+      risk_id: p.riskId,
+    }));
+    const adoptedForPdf = (adoptedProposals ?? []).map((p) => ({
+      id: p.taskId ?? p.key,
+      who: "",
+      action: p.title,
+      risk_id: p.riskId,
+    }));
+    const delta = computeDeltaSummary(displayResult, todoChecks, adoptedTasks.length > 0 ? adoptedTasks : undefined);
+    getReportText(
+      displayResult,
+      delta,
+      siteCheckMemos?.length ? siteCheckMemos : undefined,
+      todoChecks,
+      adoptedForPdf.length > 0 ? adoptedForPdf : undefined,
+      pins.length > 0 ? pins : undefined,
+    )
+      .then(setReportText)
+      .catch(() => setReportText(null));
+  }, [
+    activeStep,
+    displayResult?.simulation_id,
+    displayResult,
+    todoChecks,
+    siteCheckMemos,
+    adoptedProposals,
+    pins,
+  ]);
+
+  const assistContext = useMemo((): AssistContext | undefined => {
+    if (!showMainFlow) return undefined;
+    const todo_total_count = displayResult?.mitigation_tasks?.length ?? 0;
+    const todo_checked_count =
+      displayResult?.mitigation_tasks?.filter((m) => todoChecks[m.id]).length ?? 0;
+    const risks = displayResult?.risks
+      ? [...displayResult.risks]
+          .sort((a, b) => (b.severity ?? 0) - (a.severity ?? 0))
+          .slice(0, 20)
+          .map((r) => ({
+            title: r.title,
+            severity: r.severity ?? 0,
+            importance: r.importance,
+            urgency: r.urgency,
+            execution_difficulty: r.execution_difficulty,
+            description: r.description?.slice(0, 300),
+            mitigation_actions: r.mitigation_actions?.slice(0, 5),
+          }))
+      : undefined;
+    const todos = displayResult?.mitigation_tasks?.map((m) => ({
+      action: m.action,
+      who: m.who,
+      checked: Boolean(todoChecks[m.id]),
+    }));
+    return {
+      step: activeStep,
+      event_name: missionConfig?.event_name ?? displayResult?.event_name,
+      risk_count: displayResult?.risks?.length,
+      overall_risk_score: displayResult?.overall_risk_score,
+      summary: displayResult?.summary,
+      recommendations: displayResult?.recommendations?.slice(0, 15),
+      risks,
+      todos,
+      next_action_proposals: nextActionProposals.length > 0
+        ? nextActionProposals.map((p) => ({ title: p.title, reason: p.reason, source: p.source }))
+        : undefined,
+      report_text: reportText ?? undefined,
+      todo_checked_count: todo_total_count > 0 ? todo_checked_count : undefined,
+      todo_total_count: todo_total_count > 0 ? todo_total_count : undefined,
+      pins_count: pins.length,
+      map_todos_count: mapTodos.length,
+    };
+  }, [
+    showMainFlow,
+    activeStep,
+    missionConfig?.event_name,
+    missionConfig?.event_date,
+    displayResult,
+    todoChecks,
+    proposalDecisionLog,
+    nextActionProposals,
+    reportText,
+    pins.length,
+    mapTodos.length,
+  ]);
 
   useEffect(() => {
     if (loading) setCompletionPhase(false);
@@ -244,7 +360,7 @@ export default function App() {
           onCreateProject={createProject}
           onJoinProject={joinProject}
         />
-        <AssistFab />
+        <AssistFab assistContext={{ step: 0 }} />
       </>
     );
   }
@@ -497,7 +613,7 @@ export default function App() {
       </Box>
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <AssistFab />
+      <AssistFab assistContext={assistContext} />
     </Box>
   );
 }

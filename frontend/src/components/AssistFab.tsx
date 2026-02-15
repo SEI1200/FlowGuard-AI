@@ -13,11 +13,15 @@ import CloseIcon from "@mui/icons-material/Close";
 import SmartToyIcon from "@mui/icons-material/SmartToy";
 import SendIcon from "@mui/icons-material/Send";
 import { useLanguage } from "../i18n/LanguageContext";
-import { askAssist } from "../services/api";
+import { askAssist, type AssistContext } from "../services/api";
 
 const FAB_SIZE = 48;
 const PANEL_WIDTH = 340;
 const PANEL_HEIGHT = 440;
+const MIN_PANEL_WIDTH = 280;
+const MIN_PANEL_HEIGHT = 320;
+const MAX_PANEL_WIDTH = 560;
+const MAX_PANEL_HEIGHT = 680;
 const DRAG_THRESHOLD = 6;
 
 type MessageRole = "assistant" | "user";
@@ -27,19 +31,27 @@ interface ChatMessage {
   text: string;
 }
 
-export default function AssistFab() {
+export interface AssistFabProps {
+  /** Optional app state for context-aware next-action suggestions */
+  assistContext?: AssistContext | null;
+}
+
+export default function AssistFab({ assistContext }: AssistFabProps = {}) {
   const { t } = useLanguage();
   const [fabX, setFabX] = useState(() => typeof window !== "undefined" ? window.innerWidth - FAB_SIZE - 16 : 300);
   const [fabY, setFabY] = useState(() => typeof window !== "undefined" ? window.innerHeight - FAB_SIZE - 80 : 300);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelX, setPanelX] = useState(() => typeof window !== "undefined" ? (window.innerWidth - PANEL_WIDTH) / 2 : 200);
   const [panelY, setPanelY] = useState(() => typeof window !== "undefined" ? Math.max(60, (window.innerHeight - PANEL_HEIGHT) / 2) : 80);
+  const [panelWidth, setPanelWidth] = useState(PANEL_WIDTH);
+  const [panelHeight, setPanelHeight] = useState(PANEL_HEIGHT);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fabDragRef = useRef({ active: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, panelWasOpen: false });
   const panelDragRef = useRef({ active: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 });
+  const resizeRef = useRef({ active: false, startX: 0, startY: 0, startW: 0, startH: 0 });
   const fabClickRef = useRef({ downX: 0, downY: 0 });
 
   // パネルを開いたときに挨拶がなければ1件追加
@@ -77,12 +89,22 @@ export default function AssistFab() {
       setFabY(Math.max(0, Math.min(window.innerHeight - FAB_SIZE, fabDragRef.current.startTop + dy)));
     }
     if (panelDragRef.current.active) {
-      const dx = e.clientX - panelDragRef.current.startX;
-      const dy = e.clientY - panelDragRef.current.startY;
-      setPanelX(Math.max(0, Math.min(window.innerWidth - PANEL_WIDTH, panelDragRef.current.startLeft + dx)));
-      setPanelY(Math.max(0, Math.min(window.innerHeight - PANEL_HEIGHT, panelDragRef.current.startTop + dy)));
+      const r = panelDragRef.current;
+      const dx = e.clientX - r.startX;
+      const dy = e.clientY - r.startY;
+      const w = panelWidth;
+      const h = panelHeight;
+      setPanelX(Math.max(0, Math.min(window.innerWidth - w, r.startLeft + dx)));
+      setPanelY(Math.max(0, Math.min(window.innerHeight - h, r.startTop + dy)));
     }
-  }, []);
+    if (resizeRef.current.active) {
+      const r = resizeRef.current;
+      const dw = e.clientX - r.startX;
+      const dh = e.clientY - r.startY;
+      setPanelWidth(Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, r.startW + dw)));
+      setPanelHeight(Math.max(MIN_PANEL_HEIGHT, Math.min(MAX_PANEL_HEIGHT, r.startH + dh)));
+    }
+  }, [panelWidth, panelHeight]);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
     if (fabDragRef.current.active) {
@@ -97,7 +119,14 @@ export default function AssistFab() {
       fabDragRef.current.active = false;
     }
     if (panelDragRef.current.active) panelDragRef.current.active = false;
+    if (resizeRef.current.active) resizeRef.current.active = false;
   }, []);
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = { active: true, startX: e.clientX, startY: e.clientY, startW: panelWidth, startH: panelHeight };
+  }, [panelWidth, panelHeight]);
 
   useEffect(() => {
     window.addEventListener("mousemove", handleMouseMove);
@@ -115,7 +144,7 @@ export default function AssistFab() {
     setMessages((prev) => [...prev, { role: "user", text }]);
     setLoading(true);
     try {
-      const answer = await askAssist(text);
+      const answer = await askAssist(text, assistContext);
       setMessages((prev) => [...prev, { role: "assistant", text: answer }]);
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : t.assist.error;
@@ -123,7 +152,7 @@ export default function AssistFab() {
     } finally {
       setLoading(false);
     }
-  }, [inputValue, loading, t.assist.error]);
+  }, [inputValue, loading, assistContext, t.assist.error]);
 
   return (
     <>
@@ -161,8 +190,8 @@ export default function AssistFab() {
             position: "fixed",
             left: panelX,
             top: panelY,
-            width: PANEL_WIDTH,
-            height: PANEL_HEIGHT,
+            width: panelWidth,
+            height: panelHeight,
             borderRadius: 2,
             display: "flex",
             flexDirection: "column",
@@ -323,6 +352,31 @@ export default function AssistFab() {
               <SendIcon fontSize="small" />
             </IconButton>
           </Box>
+
+          {/* リサイズハンドル（右下） */}
+          <Box
+            onMouseDown={handleResizeMouseDown}
+            sx={{
+              position: "absolute",
+              right: 0,
+              bottom: 0,
+              width: 20,
+              height: 20,
+              cursor: "nwse-resize",
+              "&::after": {
+                content: '""',
+                position: "absolute",
+                right: 4,
+                bottom: 4,
+                width: 8,
+                height: 8,
+                borderRight: "2px solid",
+                borderBottom: "2px solid",
+                borderColor: "action.disabled",
+              },
+            }}
+            aria-label="Resize panel"
+          />
         </Paper>
       )}
     </>

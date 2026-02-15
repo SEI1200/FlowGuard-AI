@@ -25,7 +25,7 @@ frontend/   React 19 + TypeScript 5.7 + Vite 6 + MUI 6 + Google Maps (vis.gl) + 
 backend/    Python 3.11+ / FastAPI + Vertex AI (Gemini 3 Pro: 解析, Gemini 2.5 Flash: アシスト)
 ```
 
-- フロントエンドはバックエンドに HTTP でシミュレーション・翻訳・PDF・アシストを依頼
+- フロントエンドはバックエンドに HTTP でシミュレーション・翻訳・PDF・レポート本文・アシストを依頼する。アシストは現在の分析結果・ToDo・ピン・レポート本文（PDF フル版と同じ内容）をコンテキストに渡せば、具体的な質問に短文で回答する。パネルはドラッグで移動・右下でリサイズ可能。
 - プロジェクト共有を使う場合のみ Firebase（Firestore・匿名認証）を利用
 
 ## 必要な環境
@@ -54,8 +54,8 @@ pip install -r requirements.txt
 
 - `PROJECT_ID`: Google Cloud プロジェクト ID
 - `GOOGLE_MAPS_API_KEY`: Google Maps API キー
-- `LOCATION`: Vertex AI のリージョン（`gemini-3-pro-preview` 利用時は `global`）
-- `MODEL_ID`: 解析用モデル（例: `gemini-3-pro-preview`）
+- `LOCATION`: Vertex AI のリージョン（解析に `gemini-3-pro-preview` を使う場合は `global`。アシスト用モデルは別設定）
+- `MODEL_ID`: 解析用モデル（例: `gemini-3-pro-preview`）。アシスト用は `assist_engine` 側のデフォルト（Gemini 2.5 Flash）または環境変数で指定
 
 Google Cloud の認証:
 
