@@ -12,6 +12,10 @@ export interface TranslationStrings {
     leaveProject: string;
     copyCodeLabel: string;
     settingsLabel: string;
+    /** 画面上部のヒントポップアップ（コピー・AIアシストの説明） */
+    tipCopy: string;
+    tipAssist: string;
+    tipClose: string;
   };
   landing: {
     subtitle: string;
@@ -349,6 +353,9 @@ const ja: TranslationStrings = {
     leaveProject: "プロジェクトを抜ける",
     copyCodeLabel: "コードをコピー",
     settingsLabel: "設定",
+    tipCopy: "隣のコピーボタンで参加コードをコピーして、仲間に共有できます。",
+    tipAssist: "右下のロボットボタンは AI アシスト。使い方や次のアクションを相談できます。",
+    tipClose: "閉じる",
   },
   landing: {
     subtitle: "イベントリスク評価・共有",
@@ -720,6 +727,9 @@ const en: TranslationStrings = {
     leaveProject: "Leave project",
     copyCodeLabel: "Copy code",
     settingsLabel: "Settings",
+    tipCopy: "Use the copy button next to the code to copy the join code and share it with others.",
+    tipAssist: "The robot button in the bottom-right is AI Assist—ask about how to use the app or next steps.",
+    tipClose: "Close",
   },
   landing: {
     subtitle: "Event Risk Assessment & Sharing",

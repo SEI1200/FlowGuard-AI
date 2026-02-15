@@ -22,6 +22,7 @@ import SecurityIcon from "@mui/icons-material/Security";
 import SettingsIcon from "@mui/icons-material/Settings";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ExitToAppIcon from "@mui/icons-material/ExitToApp";
+import CloseIcon from "@mui/icons-material/Close";
 
 import type { LatLng, MissionConfig, SimulationResponse } from "./types";
 import type { WhatIfCase } from "./types/whatIf";
@@ -100,6 +101,21 @@ export default function App() {
   const [translatedForId, setTranslatedForId] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [reportText, setReportText] = useState<string | null>(null);
+
+  const TIP_DISMISSED_KEY = "flowguard_tip_dismissed";
+  const [tipDismissed, setTipDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(TIP_DISMISSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissTip = useCallback(() => {
+    setTipDismissed(true);
+    try {
+      localStorage.setItem(TIP_DISMISSED_KEY, "1");
+    } catch {}
+  }, []);
 
   const { result, loading, error, simulate, reset: resetSimulation } = useRiskSimulation();
 
@@ -471,6 +487,65 @@ export default function App() {
           </Box>
         </Toolbar>
       </AppBar>
+
+      {/* コピー・AIアシストの説明（雲型ポップアップ・消せる） */}
+      {showMainFlow && joinCode && !tipDismissed && (
+        <Fade in>
+          <Paper
+            elevation={0}
+            sx={{
+              position: "absolute",
+              top: 52,
+              left: 24,
+              zIndex: 1100,
+              maxWidth: 320,
+              px: 2,
+              py: 1.5,
+              borderRadius: "20px 20px 20px 6px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.12), 0 2px 8px rgba(0,122,255,0.15)",
+              bgcolor: "background.paper",
+              border: "1px solid",
+              borderColor: "divider",
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 1,
+              "&::before": {
+                content: '""',
+                position: "absolute",
+                top: -8,
+                left: 28,
+                width: 16,
+                height: 16,
+                bgcolor: "background.paper",
+                borderLeft: "1px solid",
+                borderTop: "1px solid",
+                borderColor: "divider",
+                transform: "rotate(45deg)",
+                borderRadius: "2px 0 0 0",
+              },
+            }}
+            role="status"
+            aria-live="polite"
+          >
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600, color: "primary.main" }}>
+                💡 {t.app.tipCopy}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t.app.tipAssist}
+              </Typography>
+            </Box>
+            <IconButton
+              size="small"
+              onClick={dismissTip}
+              aria-label={t.app.tipClose}
+              sx={{ mt: -0.5, mr: -0.5, color: "text.secondary" }}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Paper>
+        </Fade>
+      )}
 
       {(activeStep < 2 || loading || completionPhase || error) && (
         <Paper elevation={0} sx={{ borderBottom: "1px solid", borderColor: "divider", py: 1.5 }}>

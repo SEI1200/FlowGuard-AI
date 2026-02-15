@@ -204,6 +204,37 @@ export default function RiskDashboard({
   const [rightPanelTab, setRightPanelTab] = useState(0);
   const [adoptedProposals, setAdoptedProposals] = useState<NextActionProposal[]>([]);
 
+  /** 左パネル（リスク一覧）幅（px）。ドラッグでリサイズ可能 */
+  const [leftPanelWidth, setLeftPanelWidth] = useState(260);
+  /** 右パネル（分析等）幅（px）。ドラッグでリサイズ可能 */
+  const [rightPanelWidth, setRightPanelWidth] = useState(400);
+  const [resizeState, setResizeState] = useState<{ side: "left" | "right"; startX: number; startWidth: number } | null>(null);
+
+  const LEFT_PANEL_MIN = 200;
+  const LEFT_PANEL_MAX = 500;
+  const RIGHT_PANEL_MIN = 280;
+  const RIGHT_PANEL_MAX = 600;
+
+  useEffect(() => {
+    if (resizeState == null) return;
+    const onMove = (e: MouseEvent) => {
+      const delta = resizeState.side === "left" ? e.clientX - resizeState.startX : resizeState.startX - e.clientX;
+      const nextWidth = Math.round(Math.max(0, resizeState.startWidth + delta));
+      if (resizeState.side === "left") {
+        setLeftPanelWidth((w) => Math.min(LEFT_PANEL_MAX, Math.max(LEFT_PANEL_MIN, nextWidth)));
+      } else {
+        setRightPanelWidth((w) => Math.min(RIGHT_PANEL_MAX, Math.max(RIGHT_PANEL_MIN, nextWidth)));
+      }
+    };
+    const onUp = () => setResizeState(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resizeState]);
+
   const effectiveProposalDecisionLog =
     isInProject && Array.isArray(proposalDecisionLogFromProps)
       ? proposalDecisionLogFromProps
@@ -552,13 +583,13 @@ export default function RiskDashboard({
         </Stack>
       </Paper>
 
-      {/* Main content: 左・中央・右 */}
-      <Box sx={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      {/* Main content: 左・中央・右（左右はドラッグでリサイズ可能） */}
+      <Box sx={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden", userSelect: resizeState ? "none" : undefined }}>
         {/* 左: レイヤー＋リスク一覧 */}
         <Paper
           elevation={0}
           sx={{
-            width: 260,
+            width: leftPanelWidth,
             flexShrink: 0,
             borderRight: "1px solid",
             borderColor: "divider",
@@ -630,6 +661,26 @@ export default function RiskDashboard({
             ))}
           </List>
         </Paper>
+
+        {/* 左リサイズハンドル */}
+        <Box
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            setResizeState({ side: "left", startX: e.clientX, startWidth: leftPanelWidth });
+          }}
+          sx={{
+            width: 6,
+            flexShrink: 0,
+            cursor: "col-resize",
+            borderLeft: "1px solid",
+            borderRight: "1px solid",
+            borderColor: "divider",
+            bgcolor: resizeState?.side === "left" ? "action.selected" : "action.hover",
+            "&:hover": { bgcolor: "action.selected" },
+          }}
+          aria-label="左パネル幅を変更"
+          role="separator"
+        />
 
         {/* 中央: マップ ＋ 地図表示・交通凡例オーバーレイ */}
         <Box
@@ -739,11 +790,31 @@ export default function RiskDashboard({
           />
         </Box>
 
+        {/* 右リサイズハンドル */}
+        <Box
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            setResizeState({ side: "right", startX: e.clientX, startWidth: rightPanelWidth });
+          }}
+          sx={{
+            width: 6,
+            flexShrink: 0,
+            cursor: "col-resize",
+            borderLeft: "1px solid",
+            borderRight: "1px solid",
+            borderColor: "divider",
+            bgcolor: resizeState?.side === "right" ? "action.selected" : "action.hover",
+            "&:hover": { bgcolor: "action.selected" },
+          }}
+          aria-label="右パネル幅を変更"
+          role="separator"
+        />
+
         {/* 右: 詳細パネル（タブで分析 / ToDo・比較・メモ を切り替え） */}
         <Paper
           elevation={0}
           sx={{
-            width: 400,
+            width: rightPanelWidth,
             flexShrink: 0,
             borderLeft: "1px solid",
             borderColor: "divider",
