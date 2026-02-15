@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from collections import Counter
 
@@ -17,6 +18,7 @@ from models import (
     MitigationTask,
     MitigationImpact,
     MapDangerPoint,
+    WeatherCondition,
 )
 from services.gemini_service import GeminiService
 from services.weather_service import fetch_weather_for_event
@@ -81,14 +83,52 @@ class RiskEngine:
             weather_override = (temp, precip, cond)
             logger.info("Using fetched weather: %.1f C, %.0f%%, %s", temp, precip, cond.value)
 
-        raw_result = await self.gemini.analyze_risks(
-            request,
-            weather_override=weather_override,
-        )
+        use_multi_agent = os.environ.get("USE_MULTI_AGENT", "").strip().lower() in ("1", "true", "yes")
+        if use_multi_agent:
+            raw_result = await self._run_simulation_multi_agent(request, weather_override)
+        else:
+            raw_result = await self.gemini.analyze_risks(
+                request,
+                weather_override=weather_override,
+            )
 
         return self._build_simulation_response(
             raw_result, center_lat, center_lng, request, weather_override
         )
+
+    async def _run_simulation_multi_agent(
+        self,
+        request: SimulationRequest,
+        weather_override: tuple[float, float, WeatherCondition] | None,
+    ) -> dict:
+        """自律型マルチエージェント: 6 カテゴリ並列 + 合成エージェント。"""
+        import asyncio
+
+        categories = [c.value for c in RiskCategory]
+        tasks = [
+            self.gemini.analyze_risks_for_category(
+                request, cat, weather_override=weather_override
+            )
+            for cat in categories
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        merged_risks: list[dict] = []
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                logger.warning("Category agent %s failed: %s", categories[i], r)
+                continue
+            merged_risks.extend(r.get("risks") or [])
+
+        logger.info("Multi-agent: merged %d risks from %d categories", len(merged_risks), len(categories))
+
+        synthesis = await self.gemini.synthesize_overall(merged_risks, request)
+        return {
+            "risks": merged_risks,
+            "overall_risk_score": synthesis.get("overall_risk_score", 5.0),
+            "summary": synthesis.get("summary", "Risk analysis complete."),
+            "recommendations": synthesis.get("recommendations", []),
+        }
 
     async def translate_simulation_to_english(self, payload: dict) -> dict:
         return await self.gemini.translate_simulation_to_english(payload)

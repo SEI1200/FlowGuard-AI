@@ -12,6 +12,7 @@ from models import (
     EventType,
     AudienceType,
     WeatherCondition,
+    RiskCategory,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,45 @@ Probability should reflect real-world likelihood for this type and scale of even
 Severity should reflect potential impact on human safety and event operations (as a number 1.0–10.0).\
 """
 
+# マルチエージェント用: カテゴリ別エージェントの担当説明
+CATEGORY_FOCUS: dict[str, str] = {
+    RiskCategory.CROWD_SAFETY.value: "Crowd crush, stampede, congestion, bottlenecks, surges. Focus only on crowd_safety risks.",
+    RiskCategory.TRAFFIC_LOGISTICS.value: "Road congestion, illegal parking, vehicle-pedestrian conflicts, public transit overload, delivery vehicles. Focus only on traffic_logistics risks.",
+    RiskCategory.ENVIRONMENTAL_HEALTH.value: "Heatstroke risk (shade/hydration), sudden weather changes, evacuation route adequacy, air quality. Focus only on environmental_health risks.",
+    RiskCategory.OPERATIONAL.value: "Long entry queues, insufficient restrooms, waste management, noise complaints, communication failures. Focus only on operational risks.",
+    RiskCategory.VISIBILITY.value: "HEIGHT and BLIND SPOT risks: poor line-of-sight from staff/cameras, areas hidden by structures or terrain, stage/view obstructions, multi-level visibility gaps. Focus only on visibility risks.",
+    RiskCategory.LEGAL_COMPLIANCE.value: "LEGAL and REGULATORY: road use permits, food business notifications, fire department notifications, entertainment regulations (e.g. 風営法), copyright, noise ordinances, temporary structures permits. Focus only on legal_compliance risks.",
+}
+
+SYSTEM_PROMPT_CATEGORY_PREFIX = """\
+You are an expert risk analyst for large-scale event management. You analyse ONLY one risk category.
+
+Your task: given event parameters and geographic area, produce risks for YOUR ASSIGNED CATEGORY ONLY.
+
+ANALYSIS REQUIREMENTS:
+- Analyse geographic features combined with event characteristics.
+- Consider CASCADING RISKS (how one risk can trigger another) within or relevant to your category.
+- Provide SPECIFIC LOCATIONS within the polygon using latitude/longitude.
+- Each risk must include concrete, actionable mitigation strategies.
+- For each risk, set "location_description" to a short, concrete text (e.g. "メインステージ正面の混雑エリア", "東入口付近の歩道").
+
+OUTPUT: VALID JSON only. Schema: { "risks": [ { "category": "<ASSIGNED_CATEGORY>", "title": "string", "description": "string", "location_description": "string", "probability": 0.0-1.0, "severity": 1.0-10.0, "location": { "center": { "lat", "lng" }, "radius_meters": number }, "mitigation_actions": ["string"], "cascading_risks": ["string"] } ] }
+- probability and severity MUST be numbers only (no "High"/"低").
+- Generate 2 to 6 risk items for this category. Use plain text only in all string fields (no markdown).
+"""
+
+SYNTHESIS_SYSTEM_PROMPT = """\
+You are a synthesizer for event risk assessments. You receive a merged list of risks from multiple category experts.
+
+Your task: produce a single overall assessment.
+- overall_risk_score: number 1.0 to 10.0 reflecting the combined severity and likelihood of all risks.
+- summary: one concise paragraph (Japanese or English per locale) summarizing the key findings and priority concerns.
+- recommendations: array of 5 to 15 actionable recommendation strings (same language as summary).
+
+Output VALID JSON only: { "overall_risk_score": number, "summary": "string", "recommendations": ["string", ...] }
+Use plain text only (no markdown). Numeric fields must be numbers.
+"""
+
 LOCALE_SUFFIX = {
     "ja": (
         "\n\nLANGUAGE REQUIREMENT:\n"
@@ -218,6 +258,18 @@ ADDITIONAL NOTES FROM ORGANISER:
 Provide your risk assessment as JSON.
 Ensure all risk locations fall within or very near the polygon area.\
 {locale_instruction}"""
+
+
+def _build_category_system_prompt(category: str, locale: str) -> str:
+    focus = CATEGORY_FOCUS.get(category, "Focus only on risks in your assigned category.")
+    locale_instruction = LOCALE_SUFFIX.get(locale, "")
+    return (
+        SYSTEM_PROMPT_CATEGORY_PREFIX
+        + f"\n\nASSIGNED CATEGORY: {category}\n{focus}\n\n"
+        + "CRITICAL: Every risk in your output MUST have \"category\": \"" + category + "\".\n"
+        + "Return ONLY valid JSON: { \"risks\": [ ... ] }.\n"
+        + locale_instruction
+    )
 
 
 class GeminiService:
@@ -328,6 +380,108 @@ class GeminiService:
             f"AI response was not valid JSON after {max_retries} attempts: "
             f"{last_error}"
         )
+
+    async def analyze_risks_for_category(
+        self,
+        request: SimulationRequest,
+        category: str,
+        weather_override: tuple[float, float, "WeatherCondition"] | None = None,
+        max_retries: int = 2,
+    ) -> dict:
+        """マルチエージェント用: 指定カテゴリのみのリスクを返す。"""
+        system = _build_category_system_prompt(category, request.locale)
+        prompt = build_analysis_prompt(request, weather_override)
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            temperature=0.7,
+            top_p=0.9,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+        )
+        last_error: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await self._client.aio.models.generate_content(
+                    model=self._model_id,
+                    contents=prompt,
+                    config=config,
+                )
+                raw_text = response.text or ""
+                try:
+                    result = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    result = _repair_json(raw_text)
+                risks = result.get("risks") or []
+                for r in risks:
+                    if isinstance(r, dict):
+                        r["category"] = category
+                logger.info("Category %s: %d risks (attempt %d)", category, len(risks), attempt)
+                return {"risks": risks}
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries:
+                    await asyncio.sleep(2**attempt)
+                    continue
+                logger.error("Category %s failed: %s", category, str(exc)[:200])
+                raise
+        return {"risks": []}
+
+    async def synthesize_overall(
+        self,
+        merged_risks: list[dict],
+        request: SimulationRequest,
+        max_retries: int = 2,
+    ) -> dict:
+        """マルチエージェント用: マージ済みリスクから overall_risk_score, summary, recommendations を生成。"""
+        locale_instruction = LOCALE_SUFFIX.get(request.locale, "")
+        prompt = f"""\
+Event: {request.event_name}
+Type: {EVENT_TYPE_LABELS.get(request.event_type, request.event_type.value)}
+Location: {request.event_location}
+Attendance: {request.expected_attendance:,}
+
+MERGED RISKS FROM CATEGORY EXPERTS ({len(merged_risks)} items):
+{json.dumps(merged_risks, ensure_ascii=False, indent=0)[:12000]}
+
+Produce overall_risk_score (1.0-10.0), summary (one paragraph), and recommendations (5-15 items). Output valid JSON only.
+{locale_instruction}"""
+        config = types.GenerateContentConfig(
+            system_instruction=SYNTHESIS_SYSTEM_PROMPT,
+            temperature=0.5,
+            top_p=0.9,
+            max_output_tokens=4096,
+            response_mime_type="application/json",
+        )
+        last_error: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await self._client.aio.models.generate_content(
+                    model=self._model_id,
+                    contents=prompt,
+                    config=config,
+                )
+                raw_text = response.text or ""
+                try:
+                    result = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    result = _repair_json(raw_text)
+                return {
+                    "overall_risk_score": max(0.0, min(10.0, float(result.get("overall_risk_score", 5.0)))),
+                    "summary": result.get("summary") or "Risk analysis complete.",
+                    "recommendations": result.get("recommendations") or [],
+                }
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries:
+                    await asyncio.sleep(2**attempt)
+                    continue
+                logger.error("Synthesis failed: %s", str(exc)[:200])
+                raise
+        return {
+            "overall_risk_score": 5.0,
+            "summary": "Risk analysis complete.",
+            "recommendations": [],
+        }
 
     async def _translate_chunk(self, chunk: dict) -> dict:
         import json as _json

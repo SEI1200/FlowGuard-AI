@@ -22,10 +22,11 @@ FlowGuard AI は、地図（Google Maps / Cesium）とバックエンドの AI �
 
 ```
 frontend/   React 19 + TypeScript 5.7 + Vite 6 + MUI 6 + Google Maps (vis.gl) + Cesium
-backend/    Python 3.11+ / FastAPI + Vertex AI (Gemini 3 Pro: 解析, Gemini 2.5 Flash: アシスト)
+backend/    Python 3.11+ / FastAPI + Vertex AI (Gemini: 解析・アシスト)
 ```
 
-- フロントエンドはバックエンドに HTTP でシミュレーション・翻訳・PDF・レポート本文・アシストを依頼する。アシストは現在の分析結果・ToDo・ピン・レポート本文（PDF フル版と同じ内容）をコンテキストに渡せば、具体的な質問に短文で回答する。パネルはドラッグで移動・右下でリサイズ可能。
+- 解析は **自律型マルチエージェント**（6 カテゴリ並列エージェント + 合成エージェント）で実行。環境変数で単一モデルに切り替え可能。
+- フロントエンドはバックエンドに HTTP でシミュレーション・翻訳・PDF・レポート本文・アシストを依頼する。アシストは現在の分析結果・ToDo・ピン・レポート本文をコンテキストに渡すと具体的な質問に短文で回答する。パネルはドラッグで移動・右下でリサイズ可能。
 - プロジェクト共有を使う場合のみ Firebase（Firestore・匿名認証）を利用
 
 ## 必要な環境
@@ -56,6 +57,7 @@ pip install -r requirements.txt
 - `GOOGLE_MAPS_API_KEY`: Google Maps API キー
 - `LOCATION`: Vertex AI のリージョン（解析に `gemini-3-pro-preview` を使う場合は `global`。アシスト用モデルは別設定）
 - `MODEL_ID`: 解析用モデル（例: `gemini-3-pro-preview`）。アシスト用は `assist_engine` 側のデフォルト（Gemini 2.5 Flash）または環境変数で指定
+- `USE_MULTI_AGENT`: `1` / `true` / `yes` で自律型マルチエージェント（未設定時は単一モデル）
 
 Google Cloud の認証:
 
@@ -118,6 +120,8 @@ npm run dev
 ## デプロイ（Cloud Run）
 
 バックエンド・フロントエンドそれぞれに `Dockerfile` と（フロントは `cloudbuild.yaml`）を用意しています。Google Cloud プロジェクトで Cloud Run API・Cloud Build API を有効にしたうえで、`backend/` と `frontend/` をそれぞれソースからデプロイできます。環境変数は Cloud Run の「変数とシークレット」またはビルド時の `--substitutions`（フロントの `VITE_*`）で設定してください。
+
+**解析のデプロイ**: 変更があるのはバックエンドのみです。フロントエンドと API の入出力は変わらないため、**バックエンドを再デプロイ**すれば反映されます。自律型マルチエージェントで解析する場合は、Cloud Run の「変数とシークレット」で `USE_MULTI_AGENT=1`（または `true` / `yes`）を設定してください。フロントエンドの再デプロイは不要です。
 
 ## ドキュメント
 

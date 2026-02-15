@@ -6,13 +6,23 @@
   シングルページの React アプリ（Vite）。ランディング、3 ステップ（イベント設定 → エリア指定 → リスク分析ダッシュボード）を描画し、参加中プロジェクトでは Firestore のリアルタイムリスナーを 1 本だけ購読する。シミュレーション・テンプレート・バリデーション・翻訳・PDF はバックエンドに HTTP で依頼する。
 
 - **バックエンド**  
-  FastAPI サーバー。Vertex AI（Gemini）によるリスクシミュレーション、テンプレート・バリデーションの提供、シミュレーション結果の日→英翻訳、PDF レポート生成、レポート本文のテキスト取得（/api/report/text）、アプリガイド用の AI アシスト（/api/assist）を提供。アシストにはオプションで現在の画面状態（分析結果・リスク数・ToDo 進捗・ピン数・レポート本文など）を渡すと、次のアクション提案や具体的な質問への簡潔な回答を行う。オプションでエリアの道路スナップ（/api/area/snap-to-roads、外部 OSM 等）に対応（フロントエンド UI からは未呼び出し）。
+  FastAPI サーバー。Vertex AI（Gemini）によるリスクシミュレーション、テンプレート・バリデーションの提供、シミュレーション結果の日→英翻訳、PDF レポート生成、レポート本文のテキスト取得（/api/report/text）、アプリガイド用の AI アシスト（/api/assist）を提供。**解析**は自律型マルチエージェント（6 カテゴリ並列エージェント + 合成エージェント）で実行。環境変数で単一モデルに切り替え可能。アシストにはオプションで現在の画面状態（分析結果・リスク数・ToDo 進捗・ピン数・レポート本文など）を渡すと、次のアクション提案や具体的な質問への簡潔な回答を行う。オプションでエリアの道路スナップ（/api/area/snap-to-roads、外部 OSM 等）に対応（フロントエンド UI からは未呼び出し）。
 
 - **Firebase**  
   オプション。プロジェクト共有用に Firestore を 1 コレクション（`projects`）、1 プロジェクト = 1 ドキュメント（ドキュメント ID = 参加コード）。匿名認証で書き込み。参加コードを持つ間だけリスナーを購読し、離脱・アンマウント時に解除する。
 
 **データの流れ**  
 ユーザーが設定とポリゴンをバックエンドに送りシミュレーションを実行。結果はダッシュボードに表示され、プロジェクト参加中なら Firestore に保存される。ToDo チェック・提案の採用/却下/保留・採用済み提案・ピン・地図 ToDo はプロジェクト参加時に Firestore に書き込まれ、全参加者が `onSnapshot` で更新を受け取る。複合クエリは使わず、すべてドキュメント ID によるアクセス。
+
+## 解析の自律型マルチエージェント
+
+解析は自律型マルチエージェントで実行する。環境変数 `USE_MULTI_AGENT` が未設定または無効のときは単一モデルで実行される。
+
+- **オーケストレーター**（risk_engine）: 6 カテゴリを並列で依頼し、結果をマージして合成エージェントに渡す。
+- **カテゴリエージェント ×6**（gemini_service.analyze_risks_for_category）: 群衆安全・交通・物流・環境・保健・運営・視界・法規制の各 1 カテゴリのみを担当し、そのカテゴリのリスク一覧を返す。
+- **合成エージェント**（gemini_service.synthesize_overall）: マージ済みリスクから総合リスクスコア・サマリー・推奨事項を生成する。
+
+API の入出力（SimulationRequest / SimulationResponse）は単一モデル時と同じ。フロントエンドの変更は不要。
 
 ## 技術スタック
 
@@ -157,8 +167,8 @@ backend/
   main.py              # FastAPI アプリ、CORS、ルート: health, config, templates, validate, snap-to-roads, simulate, assist, translate-simulation, report/text, report/pdf
   models.py            # Pydantic: SimulationRequest, SimulationResponse, LatLng 等
   services/
-    risk_engine.py     # RiskEngine: run_simulation, translate_simulation_to_english
-    gemini_service.py  # Gemini 呼び出し、分析プロンプト、翻訳（チャンク並列）
+    risk_engine.py     # RiskEngine: run_simulation（単一/マルチエージェント切替）、_run_simulation_multi_agent, translate_simulation_to_english
+    gemini_service.py  # Gemini: 分析（単一/カテゴリ別）、synthesize_overall、翻訳（チャンク並列）
     assist_engine.py   # AssistEngine: アプリガイド（APP_GUIDE）とシステムプロンプトで /api/assist に回答。context.report_text があればレポート本文を基に具体的に簡潔回答。オプションの context で現在状態を前提に次のアクションを提案
     pdf_report.py      # build_pdf, get_report_text（PDF フル版と同じ構成のテキスト）
     roads_service.py   # snap_path_to_map_boundaries
